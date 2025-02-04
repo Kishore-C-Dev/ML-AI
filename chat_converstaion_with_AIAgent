@@ -1,0 +1,48 @@
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+import gradio as gr
+from IPython.display import Markdown, display, update_display
+
+load_dotenv()
+openai_api_key = os.getenv('OPENAI_API_KEY')
+openai = OpenAI()
+gpt_model = "gpt-4o-mini"
+gpt_system = "You are a helpful assistant in a clothes store. You should try to gently encourage \
+the customer to try items that are on sale. Hats are 60% off, and most other items are 50% off. \
+For example, if the customer says 'I'm looking to buy a hat', \
+you could reply something like, 'Wonderful - we have lots of hats - including several that are part of our sales evemt.'\
+Encourage the customer to buy hats if they are unsure what to get."
+
+def chat(message, history):
+
+    relevant_system_message = gpt_system
+    keywords = ['discount', 'offer', 'promotion']  # Define words that imply customer is looking for a better deal
+
+    if 'belt' in message.strip().lower():
+        relevant_system_message += (
+            " The store does not sell belts; if you are asked for belts, be sure to point out other items on sale."
+        )
+    elif any(word in message.strip().lower() for word in keywords):  # Use elif for clarity
+        relevant_system_message += (
+            " If the customer asks for more money off the selling price, the store is currently running 'buy 2 get one free' campaign, so be sure to mention this."
+        )
+    messages = [{"role": "system", "content": relevant_system_message}] + history + [{"role": "user", "content": message}]
+  
+    print("History is:")
+    print(history)
+    print("And messages is:")
+    print(messages)
+
+    stream = openai.chat.completions.create(model=gpt_model, messages=messages, stream=True)
+
+    response = ""
+    for chunk in stream:
+        response += chunk.choices[0].delta.content or ''
+        yield response
+
+
+gr.ChatInterface(fn=chat, type="messages").launch()
+
+    
+

@@ -1,0 +1,76 @@
+import requests
+from dotenv import load_dotenv
+from IPython.display import Markdown, display
+from openai import OpenAI
+
+load_dotenv(override=True)
+#nest_asyncio.apply()  # Allows re-entry into an already running event loop
+
+
+
+system_prompt = "You are an assistant that analyzes the code snippets and provide  \
+detailed explanations and add inline documentation."
+
+
+def user_prompt_for(code):
+    user_prompt = f"You are looking at a program written by user"
+    user_prompt += "\n Please provide explanation  and write comments .\n\n"
+    user_prompt += code
+    return user_prompt
+
+
+def messages_for(code):
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt_for(code)}
+    ]
+
+def stream_response(stream):
+  
+    response = ""
+    display_handle = display(Markdown(""), display_id=True)
+
+    for chunk in stream:
+        response += chunk.choices[0].delta.content or ''
+        response = response.replace("```", "").replace("markdown", "")
+        display_handle.update(Markdown(response))
+    return response
+
+def explain_local(code):
+    ollama_via_openai = OpenAI(base_url='http://localhost:11434/v1', api_key='ollama')
+
+    response = ollama_via_openai.chat.completions.create(
+        model="llama3.2",
+        messages=messages_for(code),
+        stream=True
+    )
+    return stream_response(response)
+
+
+def explain_openAI(code):
+    response = OpenAI().chat.completions.create(
+        model = "gpt-4o-mini",
+        messages = messages_for(code),
+        stream=True
+    )
+    return stream_response(response)
+
+def display_explanation(code):
+    print("From Ollama - Lama3.2")
+    summary = explain_local(code)
+    display(Markdown(summary))
+    print("From OpenAI")
+    summary = explain_openAI(code)
+    display(Markdown(summary))
+
+
+
+
+code = """Please explain what this code does and why:
+yield from {book.get("author") for book in books if book.get("author")}
+"""
+display_explanation(code)
+
+    
+
+

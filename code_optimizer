@@ -1,0 +1,156 @@
+import math
+import random
+import datetime
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+import anthropic
+
+load_dotenv()
+openai_api_key = os.getenv('OPENAI_API_KEY')
+anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
+deepseek_api_key = os.getenv('DEEPSEEK_API_KEY')
+
+
+gpt_model = "gpt-4o-2024-05-13"
+claude_model = "claude-3-5-sonnet-20241022"
+deepseek_model = "deepseek-chat"
+
+openai = OpenAI()
+claude = anthropic.Anthropic()
+deepseek=OpenAI(api_key=deepseek_api_key, base_url="https://api.deepseek.com/v1")
+
+
+system_message = "You are an assistant that reimplements Python code in high performance C++. \
+Respond only with C++ code; use comments sparingly and do not provide any explanation other than occasional comments. \
+The C++ response needs to produce an identical output in the fastest possible time."
+
+
+def user_prompt_for(python):
+    user_prompt = "Rewrite this Python code in C++ with the fastest possible implementation that produces identical output in the least time. "
+    user_prompt += "Respond only with C++ code; do not explain your work other than a few comments. "
+    user_prompt += python
+    return user_prompt
+
+def messages_for(python):
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_prompt_for(python)}
+    ]
+
+def write_output(cpp,filename):
+    code = cpp.replace("```cpp","").replace("```","")
+    with open(filename, "w") as f:
+        f.write(code)
+
+def optimize_gpt(python):    
+    stream = openai.chat.completions.create(model=gpt_model, messages=messages_for(python), stream=True)
+    reply = ""
+    for chunk in stream:
+        fragment = chunk.choices[0].delta.content or ""
+        reply += fragment
+        print(fragment, end='', flush=True)
+    write_output(reply,"optimized_gpt.cpp")
+
+def optimize_deepseek(python):  
+    print("Optimizing with Deepseek")  
+    stream = openai.chat.completions.create(model=deepseek_model, messages=messages_for(python), stream=False)
+    reply = ""
+    for chunk in stream:
+        fragment = chunk.choices[0].delta.content or ""
+        reply += fragment
+        print(fragment, end='', flush=True)
+    write_output(reply,"optimized_deepseek.cpp")
+
+
+def optimize_claude(python):
+    result = claude.messages.stream(
+        model=claude_model,
+        max_tokens=2000,
+        system=system_message,
+        messages=[{"role": "user", "content": user_prompt_for(python)}],
+    )
+    reply = ""
+    with result as stream:
+        for text in stream.text_stream:
+            reply += text
+            print(text, end="", flush=True)
+    write_output(reply,"optimized_sonnet.cpp")
+
+    # Generate random 3D points
+python="""
+def generate_points(num_points):
+        return [(random.uniform(-100, 100), random.uniform(-100, 100), random.uniform(-100, 100)) for _ in range(num_points)]
+
+        # Calculate the Euclidean distance between two points
+def calculate_distance(point1, point2):
+            return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2 + (point1[2] - point2[2])**2)
+
+        # Complex nested loop example
+def process_points(num_points, threshold):
+            points = generate_points(num_points)
+            distance_matrix = [[0] * num_points for _ in range(num_points)]
+            
+            # Outer loop: Iterate through all points
+            for i in range(num_points):
+                print(f"Loop {i}")
+                for j in range(num_points):  # Inner loop: Pairwise distance computation
+                    if i != j:  # Avoid self-comparison
+                        dist = calculate_distance(points[i], points[j])
+                        
+                        # Apply a transformation based on distance thresholds
+                        if dist < threshold:
+                            dist_transformed = math.log1p(dist)  # log(1 + distance)
+                        else:
+                            dist_transformed = dist ** 0.5  # Square root of the distance
+                        
+                        # Further conditionally modify distances for specific cases
+                        if points[i][0] > 0 and points[j][0] < 0:
+                            dist_transformed *= 1.1  # Apply a 10% penalty for crossing quadrants
+                        elif points[i][1] > 50 or points[j][2] > 50:
+                            dist_transformed *= 0.9  # Apply a 10% discount for high y or z
+                        
+                        # Store the transformed distance
+                        distance_matrix[i][j] = dist_transformed
+            
+            # Additional processing: Find points with the smallest average transformed distance
+            closest_point_indices = []
+            for i in range(num_points):
+                avg_distance = sum(distance_matrix[i]) / (num_points - 1)
+                if avg_distance < threshold:
+                    closest_point_indices.append(i)
+            
+            return points, distance_matrix, closest_point_indices
+
+            # Main function
+if __name__ == "__main__":
+                num_points = 5000
+                threshold = 50
+                starttime= datetime.datetime.now()
+                points, distance_matrix, closest_points = process_points(num_points, threshold)
+                print("Time taken to process points:", datetime.datetime.now() - starttime) 
+    """
+#exec(python)
+
+    #optimize_gpt(python)
+    #optimize_claude(python)
+optimize_deepseek(python)
+    
+    # Print results
+"""    print("Generated Points:")
+    for idx, point in enumerate(points):
+        print(f"Point {idx}: {point}")
+    
+    print("\nDistance Matrix:")
+    for row in distance_matrix:
+        print(row)
+    
+    print("\nClosest Points (Based on Average Transformed Distance):")
+    for idx in closest_points:
+        print(f"Point {idx}: {points[idx]}") """
+
+
+   
+
+
+

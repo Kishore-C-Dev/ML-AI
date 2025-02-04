@@ -1,0 +1,140 @@
+import os
+import requests
+from dotenv import load_dotenv
+from bs4 import BeautifulSoup
+from IPython.display import Markdown, display
+from openai import OpenAI
+import nest_asyncio
+import asyncio
+from playwright.async_api import async_playwright
+
+load_dotenv(override=True)
+
+openai = OpenAI()
+
+nest_asyncio.apply()  # Allows re-entry into an already running event loop
+
+def fetch_static_content(url):
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            # Parse HTML with BeautifulSoup
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # Remove non-visible elements (script, style, etc.)
+            for tag in soup(["script", "style", "meta", "noscript"]):
+                tag.decompose()
+
+            # Extract visible text
+            visible_text = soup.get_text(separator="\n", strip=True)
+            return visible_text
+        else:
+            print(f"Error fetching static content: {response.status_code}")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching static content: {e}")
+        return None
+
+async def fetch_dynamic_content(url):
+   
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+
+            # Navigate to the webpage
+            await page.goto(url)
+            await page.wait_for_selector("body")
+
+            # Get the fully rendered HTML content
+            content = await page.content()
+            await browser.close()
+
+            # Parse HTML with BeautifulSoup
+            soup = BeautifulSoup(content, "html.parser")
+
+            # Remove non-visible elements (script, style, etc.)
+            for tag in soup(["script", "style", "meta", "noscript"]):
+                tag.decompose()
+
+            # Extract visible text
+            visible_text = soup.get_text(separator="\n", strip=True)
+            return visible_text
+    
+    except Exception as e:
+        print(f"Error fetching dynamic content: {e}")
+        return None
+
+
+async def is_page_dynamic(url):
+    """
+    Determine if a page is static or dynamic by comparing static and dynamic content.
+    """
+    static_content = fetch_static_content(url)
+    dynamic_content = await fetch_dynamic_content(url)
+   
+
+    if static_content and dynamic_content:
+        print("Both static and dynamic content are available")
+        # Compare the visible text from both methods
+        static_text = BeautifulSoup(static_content, "html.parser").get_text(strip=True)
+        dynamic_text = BeautifulSoup(dynamic_content, "html.parser").get_text(strip=True)
+
+        # If the texts differ significantly, it's a dynamic page
+        if static_text != dynamic_text:
+            print("Dynamic page detected")
+            return dynamic_text
+        else:
+            print("Static page detected")
+            return static_text
+    elif dynamic_content:  # Only dynamic content is available
+        return BeautifulSoup(dynamic_content, "html.parser").get_text(strip=True)
+    else:
+        return None  # Neither static nor dynamic worked
+
+
+
+system_prompt = "You are an assistant that analyzes the contents of a website \
+and provides a short summary, ignoring text that might be navigation related. \
+respond in markdown format. \n\n"
+
+def user_prompt_for(website):
+    user_prompt = f"You are looking at a web page"
+    user_prompt += "\nThe contents of this website is as follows; \
+please provide a short summary of this website in markdown. \
+If it includes news or announcements, then summarize these too.\n\n"
+    user_prompt += website
+    return user_prompt
+
+
+def messages_for(website):
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt_for(website)}
+    ]
+
+
+
+def summarize(website):
+    response = openai.chat.completions.create(
+        model = "gpt-4o-mini",
+        messages = messages_for(website)
+    )
+    print(response.choices[0].message.content)
+    return response.choices[0].message.content
+
+
+def display_summary(website):
+    summary = summarize(website)
+    display(Markdown(summary))
+
+
+
+async def main():
+    url = "https://www.exclusiveprs.com/"
+    website =  await is_page_dynamic(url)
+    display_summary(website)
+
+# For environments with a running event loop
+if __name__ == "__main__":
+    asyncio.run(main())  # For scripts

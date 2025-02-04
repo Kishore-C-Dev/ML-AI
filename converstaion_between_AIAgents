@@ -1,0 +1,148 @@
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+import anthropic
+from IPython.display import Markdown, display, update_display
+
+load_dotenv()
+openai_api_key = os.getenv('OPENAI_API_KEY')
+anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
+
+
+openai = OpenAI()
+claude = anthropic.Anthropic()
+llama = OpenAI(base_url='http://localhost:11434/v1', api_key='ollama')
+ 
+
+gpt_model = "gpt-4o-mini"
+claude_model = "claude-3-haiku-20240307"
+ollama_model = "llama3.2"
+
+
+gpt_system = "You are a chatbot who is very argumentative; \
+you disagree with anything in the conversation and you challenge everything, in a snarky way."
+
+claude_system = "You are a very polite, courteous chatbot. You try to agree with \
+everything the other person says, or find common ground. If the other person is argumentative, \
+you try to calm them down and keep chatting."
+
+ollama_system = "You are a logical and factual chatbot. Your role is to evaluate statements made in \
+      the conversation and provide evidence or reasoning. You avoid emotional responses and aim to bring clarity and resolve conflicts. \
+        When the conversation becomes heated or illogical, you steer it back to a constructive and fact-based discussion."
+
+gpt_messages = ["I suggest we need to explore Mars"]
+claude_messages = ["Mars is a fascinating planet"]
+ollama_messages = ["Mars is the fourth planet from the Sun and it not be might inhabited by humans in the near future"]
+gpt_name = "George"
+claude_name = "Chris"
+ollama_name = "Larry"
+context_message=""
+
+def construct_joined_user_msg(msg1, msg1_name, msg2, msg2_name):
+   # context_message += msg1_name + ' said: ' + msg1 + '. \n\nThen ' + msg2_name + ' said: ' + msg2 + '.'
+    return msg1_name + ' said: ' + msg1 + '. \n\nThen ' + msg2_name + ' said: ' + msg2 + '.'
+
+def stream_response_openAI(stream):
+    response = ""  # Accumulate the full response as a string
+    display_handle = display(Markdown(""), display_id=True)
+
+    for chunk in stream:
+        # Extract the content from the current chunk
+        content = chunk.choices[0].delta.content or ""
+
+        # Update the accumulated response
+        response += content
+
+        # Stream the response to the user
+        display_handle.update(Markdown(response))
+    return response
+
+
+def call_gpt(return_messages = False):
+    #print("GPT-4o-mini")
+    messages = [{"role": "system", "content": gpt_system}]
+    for gpt, ollama, claude in zip(gpt_messages, ollama_messages, claude_messages):
+        # Add GPT's response
+        messages.append({"role": "assistant", "content": gpt})
+        # Add other's messages as user input
+        messages.append({"role": "user", "content": construct_joined_user_msg(claude, claude_name, ollama, ollama_name)})
+    print(f"Messages : {messages}")
+    if return_messages:
+        return messages
+    completion = openai.chat.completions.create(
+        model=gpt_model,
+        messages=messages,
+        max_tokens=50,
+        stream=True
+    )
+    print(f"{gpt_name} :", end="", flush=True)
+    #print(completion.choices[0].message.content)
+    return stream_response_openAI(completion)
+
+
+
+def call_ollama(return_messages=False):
+    #print("LLama3.2")
+    messages = [{"role": "system", "content": ollama_system}]
+    for gpt, ollama, anthro in zip(gpt_messages, ollama_messages, claude_messages):
+        # Add Lama's response
+        messages.append({"role": "assistant", "content": ollama})
+        # Add other's messages as user input
+        messages.append({"role": "user", "content": construct_joined_user_msg(anthro, claude_name, gpt, gpt_name)})
+    if return_messages:
+        return messages
+
+    completion = llama.chat.completions.create(
+        model=ollama_model,
+        messages=messages,
+        max_tokens=50,
+        stream=True
+    )
+    print(f"{ollama_name} :", end="", flush=True)
+    #print(completion.choices[0].message.content)
+    return stream_response_openAI(completion)
+
+
+def call_claude(return_messages=False):
+    print(f"{claude_name} :", end="", flush=True)
+    messages = []
+    for gpt, ollama, anthro in zip(gpt_messages, ollama_messages, claude_messages):
+        # Add Claude's response
+        messages.append({"role": "assistant", "content": anthro})
+        # Add other's messages as user input
+        messages.append({"role": "user", "content": construct_joined_user_msg(gpt, gpt_name, ollama, ollama_name)})
+
+    if return_messages:
+        return messages
+    with claude.messages.stream(
+            model=claude_model,
+            system=claude_system,
+            max_tokens=50,
+            messages=messages
+        ) as stream:
+        full_response = ""
+            
+            # Stream the response
+        for event in stream:
+                if hasattr(event, 'type'):
+                    if event.type == 'content_block_delta':
+                        content = event.delta.text
+                        if content:
+                            print(content, end="", flush=True)
+                            full_response += content
+            
+        print("\n")  # Add newline after response
+        return full_response
+    
+    
+
+
+for i in range(3):
+    gpt_messages.append(call_gpt())
+    print("\n")
+    ollama_messages.append(call_ollama())
+    print("\n")
+    claude_messages.append(call_claude())
+    print("\n")
+    
+

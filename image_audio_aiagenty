@@ -1,0 +1,42 @@
+import base64
+import openai
+from io import BytesIO
+from PIL import Image
+from dotenv import load_dotenv
+from openai import OpenAI
+from pydub import AudioSegment
+from pydub.playback import play
+
+load_dotenv()
+openai = OpenAI()
+def artist(city):
+    image_response = openai.images.generate(
+            model="dall-e-3",
+            prompt=f"An image representing a vacation in {city}, showing tourist spots and everything unique about {city}, in a vibrant pop-art style",
+            size="1024x1024",
+            n=1,
+            response_format="b64_json",
+        )
+    image_base64 = image_response.data[0].b64_json
+    image_data = base64.b64decode(image_base64)
+    return Image.open(BytesIO(image_data))
+
+#image = artist("Hyderabad")
+#image.show()
+
+
+
+def talker(message):
+    response = openai.audio.speech.create(
+      model="tts-1",
+      voice="alloy",    # Also, try replacing onyx with alloy
+      input=message
+    )
+    
+    audio_stream = BytesIO(response.content)
+    audio = AudioSegment.from_file(audio_stream, format="mp3")
+    play(audio)
+
+    
+
+#talker("Hello, I am a helpful assistant") 

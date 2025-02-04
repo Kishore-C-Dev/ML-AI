@@ -1,0 +1,132 @@
+import os
+import json
+from dotenv import load_dotenv
+from openai import OpenAI
+import gradio as gr
+import requests
+
+load_dotenv()
+openai_api_key = os.getenv('OPENAI_API_KEY')
+openai = OpenAI()
+gpt_model = "gpt-4o-mini"
+gpt_system = "You are a helpful assistant to provide weather and time for a city"
+
+
+
+#There's a specific dictionary structure that's required to describe our function:
+
+weather_time_function = {
+        "name": "get_weather_and_time",
+        "description": "Fetch the weather and current time for a given city.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "The name of the city to fetch details for."}
+            },
+            "required": ["city"]
+        }
+
+}
+
+tools = [{"type": "function", "function": weather_time_function}]
+
+def get_weather_and_time(city):
+    # Define the APIs
+    weather_api_url = "https://api.openweathermap.org/data/2.5/weather?lat=44.34&lon=10.99&units=metrics&appid=6735da32a13205390e7b5b3e5a99bdfe"
+    location_url = "https://nominatim.openstreetmap.org/search?addressdetails=1&q=bakery+in+berlin+wedding&format=jsonv2&limit=1"
+
+    # Weather API call
+    
+    """ geo_params = {
+        "q": "pheonix",
+        "appid": "6735da32a13205390e7b5b3e5a99bdfe",
+        "limit": "1"
+    }
+    geo_response = requests.get(location_url)
+    print(geo_response)
+    if geo_response.status_code != 200:
+        return {"error": f"Location API failed: {geo_response.text}"}
+    geo_data = geo_response.json()
+    print(geo_data)"""
+
+    weather_params = {
+        "q": "lat=44.34&lon=10.99",
+        "appid": "6735da32a13205390e7b5b3e5a99bdfe",
+        "units": "metric"
+    }    
+    weather_response = requests.get(weather_api_url)
+    if weather_response.status_code != 200:
+        return {"error": f"Weather API failed: {weather_response.text}"}
+    weather_data = weather_response.json() 
+
+    # Extract timezone from the weather data (assuming the API provides this info)
+    country_code = weather_data.get("sys", {}).get("country")
+    #timezone = f"Etc/GMT"  # Example default, replace with dynamic logic if needed
+
+    # Time API call
+    #time_response = requests.get(f"{time_api_url}/{timezone}")
+    #if time_response.status_code != 200:
+    #    return {"error": f"Time API failed: {time_response.text}"}
+    #time_data = time_response.json()
+
+    # Combine the results
+
+     
+    result = {
+        "city": city,
+        "weather": {
+            "temperature": weather_data["main"]["temp"],
+            "description": weather_data["weather"][0]["description"]
+        },
+        #"time": time_data["datetime"]
+    }
+   
+    print(result)
+    return result
+
+
+def chat(message, history):
+
+    relevant_system_message = gpt_system
+    messages = [{"role": "system", "content": relevant_system_message}] + history + [{"role": "user", "content": message}]
+    response = openai.chat.completions.create(model=gpt_model, messages=messages, tools=tools)
+    print(f"Response is {response}")
+    
+    if response.choices[0].finish_reason=="tool_calls":
+            message = response.choices[0].message
+            responses = handle_tool_call(message)
+            messages.append(message)
+            for response in responses:
+               messages.append(response)
+    
+    response = openai.chat.completions.create(model=gpt_model, messages=messages)
+        
+    return response.choices[0].message.content
+
+def handle_tool_call(message):
+    print(f"Tool call received {message}")
+    responses=[]
+    #tool_call = message.tool_calls[0]
+    for tool_call in message.tool_calls:
+        print(f"Function call is {tool_call.function.name}")
+        function_name = tool_call.function.name
+        arguments = json.loads(tool_call.function.arguments)
+        print(f"Arguments are {arguments}")
+        if function_name == "get_weather_and_time":
+            result = get_weather_and_time(**arguments)
+            print("Final Result:", result)
+            response = {
+            "role": "tool",
+            "content": json.dumps(result),
+            "tool_call_id": tool_call.id
+            }
+            responses.append(response)
+    
+    return responses
+    
+
+
+gr.ChatInterface(fn=chat, type="messages").launch()
+
+    
+

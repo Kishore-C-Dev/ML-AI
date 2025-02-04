@@ -1,0 +1,181 @@
+import os
+import requests
+from dotenv import load_dotenv
+from bs4 import BeautifulSoup
+from IPython.display import Markdown, display,update_display
+from openai import OpenAI
+import nest_asyncio
+import asyncio
+from playwright.async_api import async_playwright
+
+load_dotenv(override=True)
+
+openai = OpenAI()
+
+nest_asyncio.apply()  # Allows re-entry into an already running event loop
+    
+def get_url_list(page) :
+    urls=[]
+    links = [link.get('href') for link in page.find_all('a')]
+    urls=[link for link in links if link]
+    return urls
+
+def fetch_static_content(url):
+    try:
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            # Parse HTML with BeautifulSoup
+            soup = BeautifulSoup(response.text, "html.parser")
+            return soup
+        else:
+            print(f"Error fetching static content: {response.status_code}")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching static content: {e}")
+        return None
+
+async def fetch_dynamic_content(url):
+   
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+
+            # Navigate to the webpage
+            await page.goto(url)
+            await page.wait_for_selector("body")
+
+            # Get the fully rendered HTML content
+            content = await page.content()
+            await browser.close()
+
+            # Parse HTML with BeautifulSoup
+            soup = BeautifulSoup(content, "html.parser")
+            return soup
+    
+    except Exception as e:
+        print(f"Error fetching dynamic content: {e}")
+        return None
+
+
+async def get_page_content(url):
+    """
+    Determine if a page is static or dynamic by comparing static and dynamic content.
+    """
+    static_content = fetch_static_content(url)
+    dynamic_content = await fetch_dynamic_content(url)
+   
+
+    if static_content and dynamic_content:
+        print("Both static and dynamic content are available")
+
+        # Compare the visible text from both methods
+        static_text = static_content.get_text(strip=True)
+        dynamic_text = dynamic_content.get_text(strip=True)
+
+        # If the texts differ significantly, it's a dynamic page
+        if static_text != dynamic_text:
+            print("Dynamic page detected")
+            return dynamic_content
+        else:
+            print("Static page detected")
+            return static_content
+    elif dynamic_content:  # Only dynamic content is available
+        return dynamic_content
+    else:
+        return None  # Neither static nor dynamic worked
+
+
+
+
+
+def broucher_user_prompt_for(valid_urls):
+    user_prompt = f"You are looking at a company website\n"
+    user_prompt += f"Here are the contents of its landing page and other relevant pages; use this information to build a short brochure of the company in markdown.\n"
+    user_prompt += "\n".join(valid_urls)
+    user_prompt = user_prompt[:5_000] # Truncate if more than 5,000 characters
+    return user_prompt
+
+def urls_user_prompt_for(company_url,page_urls):
+    page_urls = [str(url) for url in page_urls]
+    user_prompt = f"Here is the list of links on the website {company_url}" 
+    user_prompt += "please decide which of these are relevant web links for a brochure about the company, respond with the full https URL in JSON format. \
+Do not include Terms of Service, Privacy, email links.\n"
+    user_prompt += "Links (some might be relative links):\n"
+    user_prompt += "\n".join(page_urls)
+    #print(f"URLS User Prompt : {user_prompt}")
+    return user_prompt
+
+
+def get_broucher_for(urls):
+    system_prompt = "You are an assistant that analyzes the contents of several relevant pages from a company website \
+and creates a short brochure about the company for prospective customers, investors and recruits. Respond in markdown.\
+Include details of company culture, customers and careers/jobs if you have the information."
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": broucher_user_prompt_for(urls)}
+    ]
+
+def get_valid_urls_for(company_url,urls):
+    link_system_prompt = f"You are provided with a list of links found on a webpage  \
+You are able to decide which of the links would be most relevant to include in a brochure about the company, \
+such as links to an About page, or a Company page, or Careers/Jobs pages.\n"
+    link_system_prompt += "You should respond in JSON as in this example:"
+    link_system_prompt += """
+{
+    "links": [
+        {"type": "about page", "url": "https://full.url/goes/here/about"},
+        {"type": "careers page": "url": "https://another.full.url/careers"}
+    ]
+}
+"""
+    return [
+        {"role": "system", "content": link_system_prompt},
+        {"role": "user", "content": urls_user_prompt_for(company_url,urls)}
+    ]
+
+
+def get_valid_urls(company_url,urls):
+
+    response = openai.chat.completions.create(
+        model = "gpt-4o-mini",
+        messages = get_valid_urls_for(company_url,urls)
+    )
+    #print(response.choices[0].message.content)
+    return response.choices[0].message.content
+
+def stream_response(stream):
+    """
+    Handles the response stream from OpenAI's API and updates the display.
+    """
+    response = ""
+    display_handle = display(Markdown(""), display_id=True)
+
+    for chunk in stream:
+        response += chunk.choices[0].delta.content or ''
+        response = response.replace("```", "").replace("markdown", "")
+        display_handle.update(Markdown(response))
+
+    return response
+
+def stream_brochure(urls):
+    stream = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=get_broucher_for(urls),
+        stream=True
+    )
+    return stream_response(stream)
+
+
+
+async def main():
+    #url = "https://www.huggingface.com/"
+    url="https://www.exclusiveprs.com/"
+    website =  await get_page_content(url)
+    navigation_urls = get_url_list(website)
+    valid_urls = get_valid_urls(url,navigation_urls)
+    stream_brochure(valid_urls)
+
+# For environments with a running event loop
+if __name__ == "__main__":
+    asyncio.run(main())  # For scripts
